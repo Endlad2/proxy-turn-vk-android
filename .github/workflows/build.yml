@@ -93,13 +93,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Build native libs
-        run: |
-          echo "::group::Build native libs"
-          chmod +x scripts/build-native-libs.sh
-          ./scripts/build-native-libs.sh
-          echo "::endgroup::"
-
       - name: Build client for ${{ matrix.arch.abi }}
         run: |
           echo "::group::Build client for ${{ matrix.arch.abi }}"
@@ -115,34 +108,59 @@ jobs:
           fi
           echo "::endgroup::"
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Build APK (${{ matrix.arch.name }})
+      - name: Build server for ${{ matrix.arch.abi }}
         run: |
-          echo "::group::Build APK for ${{ matrix.arch.name }}"
+          echo "::group::Build server for ${{ matrix.arch.abi }}"
+          chmod +x scripts/build_server.sh
           
-          # Clean previous builds
-          ./gradlew clean
-          
-          # Build with specific ABI or universal
           if [ "${{ matrix.arch.abi }}" == "universal" ]; then
-            # Build universal (all ABIs)
-            if [ "${{ github.event.inputs.build_type }}" == "release" ]; then
-              ./gradlew :app:assembleRelease
+            # Build all ABIs for universal
+            ./scripts/build_server.sh arm64-v8a
+            ./scripts/build_server.sh armeabi-v7a
+            ./scripts/build_server.sh x86_64
+          else
+            ./scripts/build_server.sh ${{ matrix.arch.abi }}
+          fi
+          echo "::endgroup::"
+
+      - name: Build APK with build_apk.sh
+        run: |
+          echo "::group::Build APK with build_apk.sh"
+          chmod +x scripts/build_apk.sh
+          
+          BUILD_TYPE="${{ github.event.inputs.build_type }}"
+          if [ -z "$BUILD_TYPE" ]; then
+            BUILD_TYPE="debug"
+          fi
+          
+          # Check if build_apk.sh accepts ABI parameter
+          if grep -q "ANDROID_ABI" scripts/build_apk.sh || grep -q "\$1" scripts/build_apk.sh; then
+            if [ "${{ matrix.arch.abi }}" == "universal" ]; then
+              ./scripts/build_apk.sh
             else
-              ./gradlew :app:assembleDebug
+              ./scripts/build_apk.sh ${{ matrix.arch.abi }}
             fi
           else
-            # Build single ABI
-            export ABI_FILTER=${{ matrix.arch.abi }}
-            if [ "${{ github.event.inputs.build_type }}" == "release" ]; then
-              ./gradlew :app:assembleRelease -Pandroid.injected.build.abi=${{ matrix.arch.abi }}
+            # If build_apk.sh doesn't accept ABI, use gradle directly
+            echo "build_apk.sh doesn't accept ABI parameter, using gradle directly"
+            if [ "${{ matrix.arch.abi }}" == "universal" ]; then
+              if [ "$BUILD_TYPE" == "release" ]; then
+                ./gradlew :app:assembleRelease
+              else
+                ./gradlew :app:assembleDebug
+              fi
             else
-              ./gradlew :app:assembleDebug -Pandroid.injected.build.abi=${{ matrix.arch.abi }}
+              if [ "$BUILD_TYPE" == "release" ]; then
+                ./gradlew :app:assembleRelease -Pandroid.injected.build.abi=${{ matrix.arch.abi }}
+              else
+                ./gradlew :app:assembleDebug -Pandroid.injected.build.abi=${{ matrix.arch.abi }}
+              fi
             fi
           fi
           echo "::endgroup::"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
       - name: Find and rename APK
         id: find_apk
@@ -154,14 +172,25 @@ jobs:
             BUILD_TYPE="debug"
           fi
           
-          # Find APK
-          if [ "${{ matrix.arch.abi }}" == "universal" ]; then
-            APK_PATH=$(find app/build/outputs/apk/$BUILD_TYPE -name "*.apk" | grep -v "unaligned" | head -n 1)
-          else
-            APK_PATH=$(find app/build/outputs/apk/$BUILD_TYPE -name "*${{ matrix.arch.abi }}*.apk" | head -n 1)
-            if [ -z "$APK_PATH" ]; then
-              APK_PATH=$(find app/build/outputs/apk/$BUILD_TYPE -name "*.apk" | grep -v "unaligned" | head -n 1)
+          # Find APK - try multiple locations
+          APK_PATH=""
+          POSSIBLE_PATHS=(
+            "app/build/outputs/apk/$BUILD_TYPE/*.apk"
+            "app/build/outputs/apk/*/*.apk"
+            "app/build/outputs/apk/*.apk"
+          )
+          
+          for pattern in "${POSSIBLE_PATHS[@]}"; do
+            FOUND=$(find $pattern -name "*.apk" 2>/dev/null | grep -v "unaligned" | head -n 1)
+            if [ -n "$FOUND" ]; then
+              APK_PATH="$FOUND"
+              break
             fi
+          done
+          
+          # If still not found, try without build type
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find app/build/outputs/apk -name "*.apk" 2>/dev/null | grep -v "unaligned" | head -n 1)
           fi
           
           echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
@@ -174,6 +203,8 @@ jobs:
             echo "APK size: $(du -h ${{ matrix.arch.output }} | cut -f1)"
           else
             echo "::error::APK not found!"
+            echo "Contents of app/build/outputs/apk:"
+            ls -la app/build/outputs/apk/ 2>/dev/null || echo "Directory not found"
             exit 1
           fi
           echo "::endgroup::"
@@ -200,7 +231,7 @@ jobs:
       - name: List artifacts
         run: |
           echo "::group::Artifacts"
-          ls -la artifacts/
+          find artifacts -name "*.apk" -type f
           echo "::endgroup::"
 
       - name: Create Release
