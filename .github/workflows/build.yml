@@ -1,0 +1,238 @@
+name: Build WDTT APKs
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag (optional)'
+        required: false
+        type: string
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - debug
+          - release
+
+jobs:
+  build:
+    name: Build APK (${{ matrix.arch.name }})
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        arch:
+          - name: arm64-v8a
+            abi: arm64-v8a
+            output: WDTT-arm64-v8a.apk
+          - name: armeabi-v7a
+            abi: armeabi-v7a
+            output: WDTT-armeabi-v7a.apk
+          - name: x86_64
+            abi: x86_64
+            output: WDTT-x86_64.apk
+          - name: universal
+            abi: universal
+            output: WDTT-universal.apk
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 11076708
+
+      - name: Setup Android NDK
+        run: |
+          echo "::group::Install Android NDK"
+          SDK_ROOT=$ANDROID_HOME
+          if [ -z "$SDK_ROOT" ]; then
+            SDK_ROOT=$ANDROID_SDK_ROOT
+          fi
+          if [ -z "$SDK_ROOT" ]; then
+            SDK_ROOT=/usr/local/android-sdk
+          fi
+          echo "SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
+          
+          # Install NDK
+          yes | $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;26.1.10909125"
+          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+          echo "::endgroup::"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Cache NDK
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build native libs
+        run: |
+          echo "::group::Build native libs"
+          chmod +x scripts/build-native-libs.sh
+          ./scripts/build-native-libs.sh
+          echo "::endgroup::"
+
+      - name: Build Go library for ${{ matrix.arch.abi }}
+        run: |
+          echo "::group::Build Go library for ${{ matrix.arch.abi }}"
+          chmod +x scripts/build-go-lib.sh
+          
+          if [ "${{ matrix.arch.abi }}" == "universal" ]; then
+            # Build all ABIs for universal
+            ./scripts/build-go-lib.sh arm64-v8a
+            ./scripts/build-go-lib.sh armeabi-v7a
+            ./scripts/build-go-lib.sh x86_64
+          else
+            ./scripts/build-go-lib.sh ${{ matrix.arch.abi }}
+          fi
+          echo "::endgroup::"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build APK (${{ matrix.arch.name }})
+        run: |
+          echo "::group::Build APK for ${{ matrix.arch.name }}"
+          
+          # Clean previous builds
+          ./gradlew clean
+          
+          # Build with specific ABI or universal
+          if [ "${{ matrix.arch.abi }}" == "universal" ]; then
+            # Build universal (all ABIs)
+            if [ "${{ github.event.inputs.build_type }}" == "release" ]; then
+              ./gradlew :app:assembleRelease
+            else
+              ./gradlew :app:assembleDebug
+            fi
+          else
+            # Build single ABI
+            export ABI_FILTER=${{ matrix.arch.abi }}
+            if [ "${{ github.event.inputs.build_type }}" == "release" ]; then
+              ./gradlew :app:assembleRelease -Pandroid.injected.build.abi=${{ matrix.arch.abi }}
+            else
+              ./gradlew :app:assembleDebug -Pandroid.injected.build.abi=${{ matrix.arch.abi }}
+            fi
+          fi
+          echo "::endgroup::"
+
+      - name: Find and rename APK
+        id: find_apk
+        run: |
+          echo "::group::Find APK"
+          
+          BUILD_TYPE="${{ github.event.inputs.build_type }}"
+          if [ -z "$BUILD_TYPE" ]; then
+            BUILD_TYPE="debug"
+          fi
+          
+          # Find APK
+          if [ "${{ matrix.arch.abi }}" == "universal" ]; then
+            APK_PATH=$(find app/build/outputs/apk/$BUILD_TYPE -name "*.apk" | grep -v "unaligned" | head -n 1)
+          else
+            APK_PATH=$(find app/build/outputs/apk/$BUILD_TYPE -name "*${{ matrix.arch.abi }}*.apk" | head -n 1)
+            if [ -z "$APK_PATH" ]; then
+              APK_PATH=$(find app/build/outputs/apk/$BUILD_TYPE -name "*.apk" | grep -v "unaligned" | head -n 1)
+            fi
+          fi
+          
+          echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
+          echo "Found APK: $APK_PATH"
+          
+          # Rename APK
+          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
+            cp "$APK_PATH" "${{ matrix.arch.output }}"
+            echo "APK_RENAMED=${{ matrix.arch.output }}" >> $GITHUB_ENV
+            echo "APK size: $(du -h ${{ matrix.arch.output }} | cut -f1)"
+          else
+            echo "::error::APK not found!"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.arch.output }}
+          path: ${{ matrix.arch.output }}
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event.inputs.release_tag != '' || github.ref_type == 'tag'
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: |
+          echo "::group::Artifacts"
+          ls -la artifacts/
+          echo "::endgroup::"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          name: Release ${{ github.event.inputs.release_tag || github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/WDTT-arm64-v8a.apk/WDTT-arm64-v8a.apk
+            artifacts/WDTT-armeabi-v7a.apk/WDTT-armeabi-v7a.apk
+            artifacts/WDTT-x86_64.apk/WDTT-x86_64.apk
+            artifacts/WDTT-universal.apk/WDTT-universal.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-matrix:
+    name: Build All (Matrix)
+    runs-on: ubuntu-latest
+    needs: build
+    if: always()
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: Create combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WDTT-All-APKs
+          path: all-artifacts/**/*.apk
+          if-no-files-found: error
