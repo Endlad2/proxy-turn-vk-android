@@ -14,7 +14,7 @@ on:
       build_type:
         description: 'Build type'
         required: true
-        default: 'release'
+        default: 'debug'
         type: choice
         options:
           - debug
@@ -83,7 +83,7 @@ jobs:
           go-version: '1.21'
           cache: true
 
-      - name: Cache NDK
+      - name: Cache Gradle
         uses: actions/cache@v3
         with:
           path: |
@@ -100,18 +100,18 @@ jobs:
           ./scripts/build-native-libs.sh
           echo "::endgroup::"
 
-      - name: Build Go library for ${{ matrix.arch.abi }}
+      - name: Build client for ${{ matrix.arch.abi }}
         run: |
-          echo "::group::Build Go library for ${{ matrix.arch.abi }}"
-          chmod +x scripts/build-go-lib.sh
+          echo "::group::Build client for ${{ matrix.arch.abi }}"
+          chmod +x scripts/build_client.sh
           
           if [ "${{ matrix.arch.abi }}" == "universal" ]; then
             # Build all ABIs for universal
-            ./scripts/build-go-lib.sh arm64-v8a
-            ./scripts/build-go-lib.sh armeabi-v7a
-            ./scripts/build-go-lib.sh x86_64
+            ./scripts/build_client.sh arm64-v8a
+            ./scripts/build_client.sh armeabi-v7a
+            ./scripts/build_client.sh x86_64
           else
-            ./scripts/build-go-lib.sh ${{ matrix.arch.abi }}
+            ./scripts/build_client.sh ${{ matrix.arch.abi }}
           fi
           echo "::endgroup::"
 
@@ -217,22 +217,3 @@ jobs:
             artifacts/WDTT-universal.apk/WDTT-universal.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build-matrix:
-    name: Build All (Matrix)
-    runs-on: ubuntu-latest
-    needs: build
-    if: always()
-    
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: all-artifacts
-
-      - name: Create combined artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: WDTT-All-APKs
-          path: all-artifacts/**/*.apk
-          if-no-files-found: error
