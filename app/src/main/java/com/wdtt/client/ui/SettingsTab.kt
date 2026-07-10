@@ -114,7 +114,7 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
     var vkHash2 by rememberSaveable { mutableStateOf("") }
     var vkHash3 by rememberSaveable { mutableStateOf("") }
     var vkHash4 by rememberSaveable { mutableStateOf("") }
-    var workersInput by rememberSaveable { mutableFloatStateOf(16f) } // Исправлено: начальное значение 16
+    var workersInput by rememberSaveable { mutableFloatStateOf(16f) }
     var showHashesDialog by rememberSaveable { mutableStateOf(false) }
     var useVKCallsAuth by rememberSaveable { mutableStateOf(true) }
     var obfsMode by rememberSaveable { mutableStateOf("audio") }
@@ -150,8 +150,6 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
             workersInput = dynamicMaxWorkers
         }
     }
-
-    val currentWorkers = workersInput.coerceIn(WORKERS_PER_GROUP.toFloat(), dynamicMaxWorkers)
 
     val hashErrors = remember(vkHash1, vkHash2, vkHash3, vkHash4) {
         buildList {
@@ -199,7 +197,6 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
         
         peerInput = peer
         parseHashes(hashes)
-        // Исправлено: загружаем сохраненное значение, не пересчитываем
         workersInput = workers.toFloat().coerceIn(WORKERS_PER_GROUP.toFloat(), dynamicMaxWorkers)
         portInput = port.toString()
         manualPortsEnabled = manualPorts
@@ -468,294 +465,308 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
             }
 
             
-                AppSectionCard(
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(0.dp)
+            AppSectionCard(
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Мощность",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "${currentWorkers.toInt()}",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    Spacer(Modifier.height(4.dp))
-
-                    val maxWorkers = dynamicMaxWorkers
-                    val minWorkers = WORKERS_PER_GROUP.toFloat()
-                    val currentWorkersVal = roundToGroup(currentWorkers.coerceIn(minWorkers, maxWorkers), maxWorkers)
-
-                    CompactSteppedSlider(
-                        value = currentWorkersVal,
-                        onValueChange = { raw ->
-                            workersInput = roundToGroup(raw, maxWorkers)
-                            scheduleSave()
-                        },
-                        valueRange = minWorkers..maxWorkers,
-                        stepSize = WORKERS_PER_GROUP.toFloat(),
-                        enabled = !tunnelRunning,
-                        modifier = Modifier.fillMaxWidth()
+                    Text(
+                        "Мощность",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
                     )
-
-                    
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    Text(
+                        text = "${workersInput.toInt()}",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
                     )
+                }
 
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "Режим",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ProtocolChip("Вызов", useVKCallsAuth, enabled = !tunnelRunning) {
-                                useVKCallsAuth = true
-                                scope.launch { settingsStore.saveVkAuthMode("vkcalls") }
-                            }
-                            ProtocolChip("Капча", !useVKCallsAuth, enabled = !tunnelRunning) {
-                                useVKCallsAuth = false
-                                scope.launch { settingsStore.saveVkAuthMode("legacy") }
-                            }
-                        }
-                    }
+                Spacer(Modifier.height(4.dp))
 
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "Маскировка",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ProtocolChip("Аудио", obfsMode == "audio", enabled = !tunnelRunning) {
-                                obfsMode = "audio"
-                                scope.launch { settingsStore.saveObfsMode("audio") }
-                            }
-                            ProtocolChip("Видео", obfsMode == "video", enabled = !tunnelRunning) {
-                                obfsMode = "video"
-                                scope.launch { settingsStore.saveObfsMode("video") }
-                            }
-                        }
-                    }
+                val maxWorkers = dynamicMaxWorkers
+                val minWorkers = WORKERS_PER_GROUP.toFloat()
+                
+                // Создаем локальное состояние для слайдера
+                var sliderPosition by remember { mutableFloatStateOf(workersInput) }
+                
+                // Обновляем позицию слайдера при изменении workersInput
+                LaunchedEffect(workersInput) {
+                    sliderPosition = workersInput.coerceIn(minWorkers, maxWorkers)
+                }
 
-                    AnimatedVisibility(
-                        visible = !useVKCallsAuth,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically()
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 4.dp),
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                            )
+                Slider(
+                    value = sliderPosition,
+                    onValueChange = { newValue ->
+                        // Округляем до шага
+                        val steps = ((maxWorkers - minWorkers) / WORKERS_PER_GROUP).toInt()
+                        val stepSize = (maxWorkers - minWorkers) / steps
+                        val rounded = (newValue / stepSize).roundToInt() * stepSize + minWorkers
+                        val finalValue = rounded.coerceIn(minWorkers, maxWorkers)
+                        
+                        sliderPosition = finalValue
+                        workersInput = finalValue
+                        scheduleSave()
+                    },
+                    valueRange = minWorkers..maxWorkers,
+                    steps = ((maxWorkers - minWorkers) / WORKERS_PER_GROUP).toInt() - 1,
+                    enabled = !tunnelRunning,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    if (autoCaptchaEnabled) "Авто капча" else "Ручная капча",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Switch(
-                                    checked = autoCaptchaEnabled,
-                                    enabled = !tunnelRunning,
-                                    onCheckedChange = { enabled ->
-                                        autoCaptchaEnabled = enabled
-                                        scope.launch {
-                                            if (enabled) {
-                                                settingsStore.saveCaptchaMode("auto")
-                                                settingsStore.saveCaptchaSolveMethod("auto")
-                                            } else {
-                                                val mode = if (useWVCaptcha) "wv" else "rjs"
-                                                settingsStore.saveCaptchaMode(mode)
-                                                settingsStore.saveCaptchaSolveMethod(if (mode == "wv" && isManualMode) "manual" else "auto")
-                                            }
-                                        }
-                                    }
-                                )
-                            }
+                
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                )
 
-                            AnimatedVisibility(
-                                visible = !autoCaptchaEnabled,
-                                enter = fadeIn() + expandVertically(),
-                                exit = fadeOut() + shrinkVertically()
-                            ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                                    
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(vertical = 4.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                                    )
-
-                                    
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            "Метод обхода капчи",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Medium,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            ProtocolChip("WBV", useWVCaptcha, enabled = !tunnelRunning) {
-                                                useWVCaptcha = true
-                                                isManualMode = wbvManualMode
-                                                scope.launch {
-                                                    settingsStore.saveCaptchaMode("wv")
-                                                    settingsStore.saveCaptchaSolveMethod(if (wbvManualMode) "manual" else "auto")
-                                                }
-                                            }
-                                            ProtocolChip("RJS", !useWVCaptcha, enabled = !tunnelRunning, isError = false) {
-                                                useWVCaptcha = false
-                                                isManualMode = false
-                                                scope.launch {
-                                                    settingsStore.saveCaptchaMode("rjs")
-                                                    settingsStore.saveCaptchaSolveMethod("auto")
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(vertical = 4.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                                    )
-
-                                    
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            "Режим обхода",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Medium,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            if (useWVCaptcha) {
-                                                ProtocolChip(
-                                                    "РУЧ",
-                                                    isManualMode,
-                                                    enabled = !tunnelRunning,
-                                                    isError = false
-                                                ) {
-                                                    isManualMode = true
-                                                    wbvManualMode = true
-                                                    scope.launch { settingsStore.saveWbvCaptchaSolveMethod("manual") }
-                                                }
-                                                ProtocolChip(
-                                                    "АВТ",
-                                                    !isManualMode,
-                                                    enabled = !tunnelRunning,
-                                                    isError = false
-                                                ) {
-                                                    isManualMode = false
-                                                    wbvManualMode = false
-                                                    scope.launch { settingsStore.saveWbvCaptchaSolveMethod("auto") }
-                                                }
-                                            } else {
-                                                ProtocolChip(
-                                                    "АВТ",
-                                                    selected = true,
-                                                    enabled = false,
-                                                    isError = false
-                                                ) {}
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Режим",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
                     )
-
-                    
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "Режим ссылки",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Switch(
-                            checked = wdttLinkMode,
-                            onCheckedChange = { enabled ->
-                                scope.launch {
-                                    settingsStore.saveWdttLinkMode(enabled)
-                                }
-                            }
-                        )
-                    }
-
-                    if (wdttLinkMode) {
-                        Column {
-                            var linkText by remember(wdttLink) { mutableStateOf(wdttLink) }
-                            OutlinedTextField(
-                                value = linkText,
-                                onValueChange = {
-                                    val cleaned = it.filter { c -> !c.isWhitespace() }
-                                    linkText = cleaned
-                                    scope.launch { settingsStore.saveWdttLink(cleaned) }
-                                },
-                                label = { Text("Ссылка wdtt://") },
-                                placeholder = { Text("Ссылка wdtt://") },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                )
-                            )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ProtocolChip("Вызов", useVKCallsAuth, enabled = !tunnelRunning) {
+                            useVKCallsAuth = true
+                            scope.launch { settingsStore.saveVkAuthMode("vkcalls") }
+                        }
+                        ProtocolChip("Капча", !useVKCallsAuth, enabled = !tunnelRunning) {
+                            useVKCallsAuth = false
+                            scope.launch { settingsStore.saveVkAuthMode("legacy") }
                         }
                     }
                 }
+
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Маскировка",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ProtocolChip("Аудио", obfsMode == "audio", enabled = !tunnelRunning) {
+                            obfsMode = "audio"
+                            scope.launch { settingsStore.saveObfsMode("audio") }
+                        }
+                        ProtocolChip("Видео", obfsMode == "video", enabled = !tunnelRunning) {
+                            obfsMode = "video"
+                            scope.launch { settingsStore.saveObfsMode("video") }
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = !useVKCallsAuth,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 4.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        )
+
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                if (autoCaptchaEnabled) "Авто капча" else "Ручная капча",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = autoCaptchaEnabled,
+                                enabled = !tunnelRunning,
+                                onCheckedChange = { enabled ->
+                                    autoCaptchaEnabled = enabled
+                                    scope.launch {
+                                        if (enabled) {
+                                            settingsStore.saveCaptchaMode("auto")
+                                            settingsStore.saveCaptchaSolveMethod("auto")
+                                        } else {
+                                            val mode = if (useWVCaptcha) "wv" else "rjs"
+                                            settingsStore.saveCaptchaMode(mode)
+                                            settingsStore.saveCaptchaSolveMethod(if (mode == "wv" && isManualMode) "manual" else "auto")
+                                        }
+                                    }
+                                }
+                            )
+                        }
+
+                        AnimatedVisibility(
+                            visible = !autoCaptchaEnabled,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                                
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                )
+
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        "Метод обхода капчи",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        ProtocolChip("WBV", useWVCaptcha, enabled = !tunnelRunning) {
+                                            useWVCaptcha = true
+                                            isManualMode = wbvManualMode
+                                            scope.launch {
+                                                settingsStore.saveCaptchaMode("wv")
+                                                settingsStore.saveCaptchaSolveMethod(if (wbvManualMode) "manual" else "auto")
+                                            }
+                                        }
+                                        ProtocolChip("RJS", !useWVCaptcha, enabled = !tunnelRunning, isError = false) {
+                                            useWVCaptcha = false
+                                            isManualMode = false
+                                            scope.launch {
+                                                settingsStore.saveCaptchaMode("rjs")
+                                                settingsStore.saveCaptchaSolveMethod("auto")
+                                            }
+                                        }
+                                    }
+                                }
+
+                                
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                )
+
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        "Режим обхода",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        if (useWVCaptcha) {
+                                            ProtocolChip(
+                                                "РУЧ",
+                                                isManualMode,
+                                                enabled = !tunnelRunning,
+                                                isError = false
+                                            ) {
+                                                isManualMode = true
+                                                wbvManualMode = true
+                                                scope.launch { settingsStore.saveWbvCaptchaSolveMethod("manual") }
+                                            }
+                                            ProtocolChip(
+                                                "АВТ",
+                                                !isManualMode,
+                                                enabled = !tunnelRunning,
+                                                isError = false
+                                            ) {
+                                                isManualMode = false
+                                                wbvManualMode = false
+                                                scope.launch { settingsStore.saveWbvCaptchaSolveMethod("auto") }
+                                            }
+                                        } else {
+                                            ProtocolChip(
+                                                "АВТ",
+                                                selected = true,
+                                                enabled = false,
+                                                isError = false
+                                            ) {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                )
+
+                
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Режим ссылки",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = wdttLinkMode,
+                        onCheckedChange = { enabled ->
+                            scope.launch {
+                                settingsStore.saveWdttLinkMode(enabled)
+                            }
+                        }
+                    )
+                }
+
+                if (wdttLinkMode) {
+                    Column {
+                        var linkText by remember(wdttLink) { mutableStateOf(wdttLink) }
+                        OutlinedTextField(
+                            value = linkText,
+                            onValueChange = {
+                                val cleaned = it.filter { c -> !c.isWhitespace() }
+                                linkText = cleaned
+                                scope.launch { settingsStore.saveWdttLink(cleaned) }
+                            },
+                            label = { Text("Ссылка wdtt://") },
+                            placeholder = { Text("Ссылка wdtt://") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                            )
+                        )
+                    }
+                }
             }
+        }
 
         
         val tunnelSecretsMissing = savedConnectionPassword.isBlank()
@@ -877,106 +888,11 @@ private fun ProtocolChip(label: String, selected: Boolean, enabled: Boolean = tr
     )
 }
 
-@Composable
-private fun CompactSteppedSlider(
-    value: Float,
-    onValueChange: (Float) -> Unit,
-    valueRange: ClosedFloatingPointRange<Float>,
-    stepSize: Float,
-    enabled: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val activeColor = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.38f)
-    val inactiveColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (enabled) 1f else 0.55f)
-    val thumbStrokeColor = MaterialTheme.colorScheme.surface
-    val density = LocalDensity.current
-    val thumbRadiusPx = with(density) { 9.dp.toPx() }
-    val trackWidthPx = with(density) { 5.dp.toPx() }
-
-    fun snap(raw: Float): Float {
-        val min = valueRange.start
-        val max = valueRange.endInclusive
-        val snapped = (((raw - min) / stepSize).roundToInt() * stepSize) + min
-        return snapped.coerceIn(min, max)
-    }
-
-    fun positionToValue(x: Float, width: Float): Float {
-        val left = thumbRadiusPx
-        val right = (width - thumbRadiusPx).coerceAtLeast(left + 1f)
-        val fraction = ((x.coerceIn(left, right) - left) / (right - left)).coerceIn(0f, 1f)
-        return snap(valueRange.start + fraction * (valueRange.endInclusive - valueRange.start))
-    }
-
-    Canvas(
-        modifier = modifier
-            .height(34.dp)
-            .pointerInput(enabled, valueRange, stepSize) {
-                if (!enabled) return@pointerInput
-                detectTapGestures { offset ->
-                    onValueChange(positionToValue(offset.x, size.width.toFloat()))
-                }
-            }
-            .pointerInput(enabled, valueRange, stepSize) {
-                if (!enabled) return@pointerInput
-                detectDragGestures { change, _ ->
-                    onValueChange(positionToValue(change.position.x, size.width.toFloat()))
-                }
-            }
-    ) {
-        val centerY = size.height / 2f
-        val left = thumbRadiusPx
-        val right = size.width - thumbRadiusPx
-        val range = (valueRange.endInclusive - valueRange.start).coerceAtLeast(1f)
-        val fraction = ((value - valueRange.start) / range).coerceIn(0f, 1f)
-        val thumbX = left + (right - left) * fraction
-
-        drawLine(
-            color = inactiveColor,
-            start = Offset(left, centerY),
-            end = Offset(right, centerY),
-            strokeWidth = trackWidthPx,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = activeColor,
-            start = Offset(left, centerY),
-            end = Offset(thumbX, centerY),
-            strokeWidth = trackWidthPx,
-            cap = StrokeCap.Round
-        )
-
-        val tickCount = (((valueRange.endInclusive - valueRange.start) / stepSize).roundToInt()).coerceAtLeast(1)
-        repeat(tickCount + 1) { index ->
-            val tickFraction = index / tickCount.toFloat()
-            val tickX = left + (right - left) * tickFraction
-            drawCircle(
-                color = if (tickX <= thumbX) activeColor else inactiveColor,
-                radius = 2.dp.toPx(),
-                center = Offset(tickX, centerY)
-            )
-        }
-
-        drawCircle(
-            color = activeColor,
-            radius = thumbRadiusPx,
-            center = Offset(thumbX, centerY)
-        )
-        drawCircle(
-            color = thumbStrokeColor,
-            radius = thumbRadiusPx,
-            center = Offset(thumbX, centerY),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
-        )
-    }
-}
-
 /**
  * Округляет значение до ближайшего кратного группы.
- * Если groupSize <= 0, возвращает значение как есть.
  */
 private fun roundToGroup(value: Float, groupSize: Float): Float {
     if (groupSize <= 0) return value.coerceAtLeast(1f)
-    
     val groups = (value / groupSize).toInt()
     val remainder = value % groupSize
     val rounded = if (remainder >= groupSize / 2f) {
