@@ -14,7 +14,7 @@ on:
       build_type:
         description: 'Build type'
         required: true
-        default: 'debug'
+        default: 'release'
         type: choice
         options:
           - debug
@@ -78,7 +78,43 @@ jobs:
             git \
             wget \
             curl \
-            tree
+            tree \
+            apksigner
+          echo "::endgroup::"
+
+      - name: Prepare release keystore and local.properties
+        run: |
+          echo "::group::Prepare release keystore and local.properties"
+          
+          # Удаляем local.properties если существует
+          if [ -f "local.properties" ]; then
+            echo "Removing existing local.properties"
+            rm -f local.properties
+          fi
+          
+          # Создаем release keystore
+          echo "Creating release keystore..."
+          keytool -genkey -v -keystore release.keystore \
+            -alias release-key \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass release123 \
+            -keypass release123 \
+            -dname "CN=WDTT, OU=Development, O=WDTT, L=City, ST=State, C=US"
+          
+          # Создаем local.properties с пустым sdk.dir
+          echo "Creating local.properties..."
+          cat > local.properties << EOF
+sdk.dir=
+KEYSTORE_FILE=$(pwd)/release.keystore
+KEYSTORE_PASSWORD=release123
+KEY_ALIAS=release-key
+KEY_PASSWORD=release123
+EOF
+          
+          echo "local.properties created with content:"
+          cat local.properties
           echo "::endgroup::"
 
       - name: Cache Gradle
@@ -138,7 +174,7 @@ jobs:
           
           BUILD_TYPE="${{ github.event.inputs.build_type }}"
           if [ -z "$BUILD_TYPE" ]; then
-            BUILD_TYPE="debug"
+            BUILD_TYPE="release"
           fi
           
           export BUILD_TYPE=$BUILD_TYPE
@@ -158,45 +194,7 @@ jobs:
       - name: Show project tree
         run: |
           echo "::group::Project tree"
-          tree -L 3
-          echo "::endgroup::"
-
-      - name: Find and upload APKs
-        run: |
-          echo "::group::Find APKs"
-          
-          BUILD_TYPE="${{ github.event.inputs.build_type }}"
-          if [ -z "$BUILD_TYPE" ]; then
-            BUILD_TYPE="debug"
-          fi
-          
-          # Find all APK files (excluding unaligned ones)
-          APK_FILES=$(find app/build/outputs/apk -name "*.apk" 2>/dev/null | grep -v "unaligned" || echo "")
-          
-          if [ -z "$APK_FILES" ]; then
-            APK_FILES=$(find . -name "*.apk" -not -path "./.gradle/*" 2>/dev/null | grep -v "unaligned" || echo "")
-          fi
-          
-          if [ -n "$APK_FILES" ]; then
-            echo "Found APK files:"
-            echo "$APK_FILES"
-            
-            # Upload each APK found
-            for apk in $APK_FILES; do
-              echo "Processing: $apk"
-              apk_name=$(basename "$apk")
-              echo "APK_NAME=$apk_name" >> $GITHUB_ENV
-              
-              # Upload as artifact with unique name
-              echo "::group::Upload $apk_name"
-              echo "Uploading: $apk_name"
-              echo "::endgroup::"
-            done
-          else
-            echo "::warning::No APK files found"
-            find app/build/outputs -type f 2>/dev/null || echo "No files found"
-          fi
-          
+          tree -L 3 app/build/outputs || echo "No outputs found"
           echo "::endgroup::"
 
       - name: Upload APK artifacts
