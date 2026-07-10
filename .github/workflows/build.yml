@@ -79,7 +79,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'  # Рабочая версия без флагов
+          go-version: '1.25'
           cache: true
 
       - name: Setup additional dependencies
@@ -141,6 +141,7 @@ jobs:
         env:
           GO111MODULE: on
           GOPROXY: https://proxy.golang.org,direct
+          GOFLAGS: "-ldflags=-checklinkname=0"
         run: |
           echo "::group::Build client for ${{ matrix.arch.abi }}"
           
