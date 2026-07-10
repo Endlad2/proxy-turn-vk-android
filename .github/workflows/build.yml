@@ -14,7 +14,7 @@ on:
       build_type:
         description: 'Build type'
         required: true
-        default: 'debug'
+        default: 'release'
         type: choice
         options:
           - debug
@@ -22,24 +22,8 @@ on:
 
 jobs:
   build:
-    name: Build APK (${{ matrix.arch.name }})
+    name: Build WDTT APKs
     runs-on: ubuntu-latest
-    
-    strategy:
-      matrix:
-        arch:
-          - name: arm64-v8a
-            abi: arm64-v8a
-            output: WDTT-arm64-v8a.apk
-          - name: armeabi-v7a
-            abi: armeabi-v7a
-            output: WDTT-armeabi-v7a.apk
-          - name: x86_64
-            abi: x86_64
-            output: WDTT-x86_64.apk
-          - name: universal
-            abi: universal
-            output: WDTT-universal.apk
     
     steps:
       - name: Checkout code
@@ -79,7 +63,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.22'
           cache: true
 
       - name: Setup additional dependencies
@@ -123,7 +107,6 @@ jobs:
           chmod +x scripts/build-go-lib.sh || true
           chmod +x scripts/build_client.sh || true
           chmod +x scripts/build_apk.sh || true
-          chmod +x scripts/*.bat || true
           chmod +x gradlew || true
           echo "All scripts are now executable"
 
@@ -137,42 +120,23 @@ jobs:
           fi
           echo "::endgroup::"
 
-      - name: Build client for ${{ matrix.arch.abi }}
+      - name: Build client
         env:
           GO111MODULE: on
           GOPROXY: https://proxy.golang.org,direct
           GOFLAGS: "-ldflags=-checklinkname=0"
         run: |
-          echo "::group::Build client for ${{ matrix.arch.abi }}"
-          
-          export ANDROID_ABI=${{ matrix.arch.abi }}
-          export ABI_FILTER=${{ matrix.arch.abi }}
-          
-          if [ "${{ matrix.arch.abi }}" == "universal" ]; then
-            if grep -q "\$1" scripts/build_client.sh; then
-              ./scripts/build_client.sh arm64-v8a
-              ./scripts/build_client.sh armeabi-v7a
-              ./scripts/build_client.sh x86_64
-            else
-              ./scripts/build_client.sh
-            fi
-          else
-            if grep -q "\$1" scripts/build_client.sh; then
-              ./scripts/build_client.sh ${{ matrix.arch.abi }}
-            else
-              export ABI_FILTER=${{ matrix.arch.abi }}
-              ./scripts/build_client.sh
-            fi
-          fi
+          echo "::group::Build client"
+          ./scripts/build_client.sh
           echo "::endgroup::"
 
-      - name: Build APK with build_apk.sh
+      - name: Build APKs with build_apk.sh
         run: |
-          echo "::group::Build APK with build_apk.sh"
+          echo "::group::Build APKs with build_apk.sh"
           
           BUILD_TYPE="${{ github.event.inputs.build_type }}"
           if [ -z "$BUILD_TYPE" ]; then
-            BUILD_TYPE="debug"
+            BUILD_TYPE="release"
           fi
           
           export BUILD_TYPE=$BUILD_TYPE
@@ -180,75 +144,70 @@ jobs:
           if [ -f "scripts/build_apk.sh" ]; then
             ./scripts/build_apk.sh
           else
-            echo "build_apk.sh not found, using gradle directly"
-            if [ "$BUILD_TYPE" == "release" ]; then
-              ./gradlew :app:assembleRelease
-            else
-              ./gradlew :app:assembleDebug
-            fi
-          fi
-          echo "::endgroup::"
-
-      - name: Find and rename APK
-        id: find_apk
-        run: |
-          echo "::group::Find APK"
-          
-          BUILD_TYPE="${{ github.event.inputs.build_type }}"
-          if [ -z "$BUILD_TYPE" ]; then
-            BUILD_TYPE="debug"
-          fi
-          
-          APK_PATH=""
-          POSSIBLE_PATHS=(
-            "app/build/outputs/apk/$BUILD_TYPE/*.apk"
-            "app/build/outputs/apk/*/*.apk"
-            "app/build/outputs/apk/*.apk"
-            "app/build/outputs/*.apk"
-            "app/build/outputs/apk/**/*.apk"
-          )
-          
-          for pattern in "${POSSIBLE_PATHS[@]}"; do
-            FOUND=$(find $pattern -name "*.apk" 2>/dev/null | grep -v "unaligned" | head -n 1)
-            if [ -n "$FOUND" ]; then
-              APK_PATH="$FOUND"
-              break
-            fi
-          done
-          
-          if [ -z "$APK_PATH" ]; then
-            APK_PATH=$(find . -name "*.apk" -not -path "./.gradle/*" 2>/dev/null | grep -v "unaligned" | head -n 1)
-          fi
-          
-          echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
-          echo "Found APK: $APK_PATH"
-          
-          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
-            if [[ "$APK_PATH" == *"arm64-v8a"* ]]; then
-              cp "$APK_PATH" "WDTT-arm64-v8a.apk"
-            elif [[ "$APK_PATH" == *"armeabi-v7a"* ]]; then
-              cp "$APK_PATH" "WDTT-armeabi-v7a.apk"
-            elif [[ "$APK_PATH" == *"x86_64"* ]]; then
-              cp "$APK_PATH" "WDTT-x86_64.apk"
-            elif [[ "$APK_PATH" == *"universal"* ]]; then
-              cp "$APK_PATH" "WDTT-universal.apk"
-            else
-              cp "$APK_PATH" "${{ matrix.arch.output }}"
-            fi
-            echo "APK_RENAMED=${{ matrix.arch.output }}" >> $GITHUB_ENV
-            echo "APK size: $(du -h ${{ matrix.arch.output }} | cut -f1)"
-          else
-            echo "::error::APK not found!"
-            find app/build/outputs -type f 2>/dev/null || echo "No files found"
+            echo "::error::build_apk.sh not found!"
             exit 1
           fi
           echo "::endgroup::"
 
-      - name: Upload APK artifact
+      - name: Find and rename APKs
+        id: find_apks
+        run: |
+          echo "::group::Find and rename APKs"
+          
+          BUILD_TYPE="${{ github.event.inputs.build_type }}"
+          if [ -z "$BUILD_TYPE" ]; then
+            BUILD_TYPE="release"
+          fi
+          
+          # Find all APKs
+          APK_PATHS=$(find app/build/outputs/apk -name "*.apk" 2>/dev/null | grep -v "unaligned")
+          
+          if [ -z "$APK_PATHS" ]; then
+            echo "::error::No APKs found!"
+            find app/build/outputs -type f 2>/dev/null || echo "No files found"
+            exit 1
+          fi
+          
+          echo "Found APKs:"
+          echo "$APK_PATHS"
+          
+          # Copy and rename each APK
+          for APK_PATH in $APK_PATHS; do
+            if [[ "$APK_PATH" == *"arm64-v8a"* ]]; then
+              cp "$APK_PATH" "WDTT-arm64-v8a.apk"
+              echo "Created: WDTT-arm64-v8a.apk"
+            elif [[ "$APK_PATH" == *"armeabi-v7a"* ]]; then
+              cp "$APK_PATH" "WDTT-armeabi-v7a.apk"
+              echo "Created: WDTT-armeabi-v7a.apk"
+            elif [[ "$APK_PATH" == *"x86_64"* ]]; then
+              cp "$APK_PATH" "WDTT-x86_64.apk"
+              echo "Created: WDTT-x86_64.apk"
+            elif [[ "$APK_PATH" == *"universal"* ]]; then
+              cp "$APK_PATH" "WDTT-universal.apk"
+              echo "Created: WDTT-universal.apk"
+            else
+              # If can't detect, copy with generic name
+              BASENAME=$(basename "$APK_PATH")
+              cp "$APK_PATH" "$BASENAME"
+              echo "Created: $BASENAME"
+            fi
+          done
+          
+          echo "::endgroup::"
+
+      - name: List built APKs
+        run: |
+          echo "::group::Built APKs"
+          ls -lh *.apk 2>/dev/null || echo "No APK files found"
+          echo "::endgroup::"
+
+      - name: Upload all APKs as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.arch.output }}
-          path: ${{ matrix.arch.output }}
+          name: WDTT-APKs
+          path: |
+            WDTT-*.apk
+            *.apk
           if-no-files-found: error
 
   release:
@@ -277,9 +236,9 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/WDTT-arm64-v8a.apk/WDTT-arm64-v8a.apk
-            artifacts/WDTT-armeabi-v7a.apk/WDTT-armeabi-v7a.apk
-            artifacts/WDTT-x86_64.apk/WDTT-x86_64.apk
-            artifacts/WDTT-universal.apk/WDTT-universal.apk
+            artifacts/WDTT-APKs/WDTT-arm64-v8a.apk
+            artifacts/WDTT-APKs/WDTT-armeabi-v7a.apk
+            artifacts/WDTT-APKs/WDTT-x86_64.apk
+            artifacts/WDTT-APKs/WDTT-universal.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
