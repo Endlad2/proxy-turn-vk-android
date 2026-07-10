@@ -114,7 +114,7 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
     var vkHash2 by rememberSaveable { mutableStateOf("") }
     var vkHash3 by rememberSaveable { mutableStateOf("") }
     var vkHash4 by rememberSaveable { mutableStateOf("") }
-    var workersInput by rememberSaveable { mutableFloatStateOf(18f) }
+    var workersInput by rememberSaveable { mutableFloatStateOf(16f) } // Исправлено: начальное значение 16
     var showHashesDialog by rememberSaveable { mutableStateOf(false) }
     var useVKCallsAuth by rememberSaveable { mutableStateOf(true) }
     var obfsMode by rememberSaveable { mutableStateOf("audio") }
@@ -199,7 +199,8 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
         
         peerInput = peer
         parseHashes(hashes)
-        workersInput = roundToGroup(workers.toFloat(), (listOf(vkHash1, vkHash2, vkHash3, vkHash4).count { it.isNotBlank() }.coerceAtLeast(1) * 27).toFloat())
+        // Исправлено: загружаем сохраненное значение, не пересчитываем
+        workersInput = workers.toFloat().coerceIn(WORKERS_PER_GROUP.toFloat(), dynamicMaxWorkers)
         portInput = port.toString()
         manualPortsEnabled = manualPorts
         serverDtlsPortInput = serverDtlsPort.toString()
@@ -971,15 +972,17 @@ private fun CompactSteppedSlider(
 
 /**
  * Округляет значение до ближайшего кратного группы.
+ * Если groupSize <= 0, возвращает значение как есть.
  */
 private fun roundToGroup(value: Float, groupSize: Float): Float {
+    if (groupSize <= 0) return value.coerceAtLeast(1f)
+    
     val groups = (value / groupSize).toInt()
     val remainder = value % groupSize
-    return if (remainder >= groupSize / 2f) {
+    val rounded = if (remainder >= groupSize / 2f) {
         (groups + 1) * groupSize
     } else {
         groups * groupSize
     }
+    return rounded.coerceAtLeast(1f)
 }
-
-
