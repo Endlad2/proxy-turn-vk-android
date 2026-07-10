@@ -105,13 +105,11 @@ jobs:
           
           # Создаем local.properties с пустым sdk.dir
           echo "Creating local.properties..."
-          cat > local.properties << 'EOF'
-sdk.dir=
-KEYSTORE_FILE=$(pwd)/release.keystore
-KEYSTORE_PASSWORD=release123
-KEY_ALIAS=release-key
-KEY_PASSWORD=release123
-EOF
+          echo "sdk.dir=" > local.properties
+          echo "KEYSTORE_FILE=$(pwd)/release.keystore" >> local.properties
+          echo "KEYSTORE_PASSWORD=release123" >> local.properties
+          echo "KEY_ALIAS=release-key" >> local.properties
+          echo "KEY_PASSWORD=release123" >> local.properties
           
           echo "local.properties created with content:"
           cat local.properties
