@@ -10,10 +10,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.clickable
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -137,6 +137,7 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
     var configs by rememberSaveable { mutableStateOf<List<Config>>(emptyList()) }
     var selectedConfigId by rememberSaveable { mutableStateOf<String?>(null) }
     var showAddConfigDialog by rememberSaveable { mutableStateOf(false) }
+    var showManualInputDialog by rememberSaveable { mutableStateOf(false) }
 
     val allHashes = remember(vkHash1, vkHash2, vkHash3, vkHash4) { listOf(vkHash1, vkHash2, vkHash3, vkHash4) }
     val uniqueHashes = remember(vkHash1, vkHash2, vkHash3, vkHash4) { allHashes.filter { it.isNotBlank() && it.length >= 16 }.distinct() }
@@ -446,8 +447,7 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
             onDismiss = { showAddConfigDialog = false },
             onAddManual = {
                 showAddConfigDialog = false
-                // Показываем диалог ручного ввода
-                // Здесь можно добавить логику
+                showManualInputDialog = true
             },
             onAddFromClipboard = {
                 showAddConfigDialog = false
@@ -460,7 +460,6 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                             if (selectedConfigId == null) {
                                 selectedConfigId = config.id
                             }
-                            // Сохраняем в настройки
                             scope.launch {
                                 settingsStore.saveWdttLink(clipboardText)
                             }
@@ -474,6 +473,37 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                 } else {
                     Toast.makeText(context, "Буфер обмена пуст", Toast.LENGTH_SHORT).show()
                 }
+            }
+        )
+    }
+
+    // Диалог ручного ввода
+    if (showManualInputDialog) {
+        ManualInputDialog(
+            onDismiss = { showManualInputDialog = false },
+            onAdd = { link ->
+                if (link.isNotBlank()) {
+                    try {
+                        val config = Config.fromLink(link)
+                        if (config != null) {
+                            configs = configs + config
+                            if (selectedConfigId == null) {
+                                selectedConfigId = config.id
+                            }
+                            scope.launch {
+                                settingsStore.saveWdttLink(link)
+                            }
+                            Toast.makeText(context, "Конфиг добавлен", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Неверный формат ссылки", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Ошибка добавления конфига", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    Toast.makeText(context, "Введите ссылку", Toast.LENGTH_SHORT).show()
+                }
+                showManualInputDialog = false
             }
         )
     }
@@ -920,7 +950,6 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                                             isSelected = config.id == selectedConfigId,
                                             onSelect = {
                                                 selectedConfigId = config.id
-                                                // Сохраняем выбранный конфиг в настройки
                                                 scope.launch {
                                                     settingsStore.saveWdttLink(config.toLink())
                                                 }
@@ -1159,6 +1188,65 @@ private fun AddConfigDialog(
                 ) {
                     Text("Из буфера")
                 }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        }
+    )
+}
+
+@Composable
+private fun ManualInputDialog(
+    onDismiss: () -> Unit,
+    onAdd: (link: String) -> Unit
+) {
+    var linkInput by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Ручной ввод конфига")
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Введите ссылку в формате:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "wdtt://IP:DTLS:WG:PORT:PASSWORD:HASH",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium
+                )
+                OutlinedTextField(
+                    value = linkInput,
+                    onValueChange = { linkInput = it },
+                    label = { Text("Ссылка wdtt://") },
+                    placeholder = { Text("wdtt://1.2.3.4:56000:56001:9000:pass:hash") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onAdd(linkInput)
+                }
+            ) {
+                Text("Добавить")
             }
         },
         dismissButton = {
