@@ -120,9 +120,12 @@ jobs:
       - name: Make scripts executable
         run: |
           chmod +x scripts/build_go_libs || true
+          chmod +x scripts/build-go-lib.sh || true
           chmod +x scripts/build_client.sh || true
           chmod +x scripts/build_apk.sh || true
           chmod +x gradlew || true
+
+
 
       - name: Build Go libs
         run: |
