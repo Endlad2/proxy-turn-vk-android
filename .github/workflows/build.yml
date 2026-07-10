@@ -63,7 +63,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
           cache: true
 
       - name: Setup additional dependencies
@@ -120,13 +120,24 @@ jobs:
           fi
           echo "::endgroup::"
 
-      - name: Build client
+      - name: Build client with checklinkname fix
         env:
           GO111MODULE: on
           GOPROXY: https://proxy.golang.org,direct
-          GOFLAGS: "-ldflags=-checklinkname=0"
         run: |
           echo "::group::Build client"
+          
+          # Set the flag for Go 1.23+ using GOFLAGS
+          export GOFLAGS="-ldflags=-checklinkname=0"
+          
+          # Also try CGO_LDFLAGS
+          export CGO_LDFLAGS="-checklinkname=0"
+          
+          # Show Go version and flags
+          go version
+          echo "GOFLAGS=$GOFLAGS"
+          
+          # Run the build script
           ./scripts/build_client.sh
           echo "::endgroup::"
 
@@ -186,7 +197,6 @@ jobs:
               cp "$APK_PATH" "WDTT-universal.apk"
               echo "Created: WDTT-universal.apk"
             else
-              # If can't detect, copy with generic name
               BASENAME=$(basename "$APK_PATH")
               cp "$APK_PATH" "$BASENAME"
               echo "Created: $BASENAME"
