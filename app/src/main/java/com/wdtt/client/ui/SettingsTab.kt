@@ -488,36 +488,70 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                     )
                 }
 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(8.dp))
 
                 val maxWorkers = dynamicMaxWorkers
                 val minWorkers = WORKERS_PER_GROUP.toFloat()
                 
-                // Создаем локальное состояние для слайдера
-                var sliderPosition by remember { mutableFloatStateOf(workersInput) }
+                // Состояние для поля ввода
+                var inputText by remember { mutableStateOf(workersInput.toInt().toString()) }
                 
-                // Обновляем позицию слайдера при изменении workersInput
+                // Обновляем поле при изменении workersInput
                 LaunchedEffect(workersInput) {
-                    sliderPosition = workersInput.coerceIn(minWorkers, maxWorkers)
+                    inputText = workersInput.toInt().toString()
                 }
 
-                Slider(
-                    value = sliderPosition,
-                    onValueChange = { newValue ->
-                        // Округляем до шага
-                        val steps = ((maxWorkers - minWorkers) / WORKERS_PER_GROUP).toInt()
-                        val stepSize = (maxWorkers - minWorkers) / steps
-                        val rounded = (newValue / stepSize).roundToInt() * stepSize + minWorkers
-                        val finalValue = rounded.coerceIn(minWorkers, maxWorkers)
-                        
-                        sliderPosition = finalValue
-                        workersInput = finalValue
-                        scheduleSave()
-                    },
-                    valueRange = minWorkers..maxWorkers,
-                    steps = ((maxWorkers - minWorkers) / WORKERS_PER_GROUP).toInt() - 1,
-                    enabled = !tunnelRunning,
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = inputText,
+                        onValueChange = { 
+                            // Разрешаем ввод только цифр
+                            if (it.isEmpty() || it.all { char -> char.isDigit() }) {
+                                inputText = it
+                            }
+                        },
+                        label = { Text("Количество воркеров") },
+                        placeholder = { Text("Введите число") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        enabled = !tunnelRunning,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                        )
+                    )
+                    
+                    Button(
+                        onClick = {
+                            val newValue = inputText.toIntOrNull()
+                            if (newValue != null) {
+                                val clampedValue = newValue.toFloat().coerceIn(minWorkers, maxWorkers)
+                                val roundedValue = roundToGroup(clampedValue, maxWorkers)
+                                workersInput = roundedValue
+                                inputText = roundedValue.toInt().toString()
+                                scheduleSave()
+                            }
+                        },
+                        modifier = Modifier.height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        enabled = !tunnelRunning && inputText.isNotEmpty() && inputText.toIntOrNull() != null
+                    ) {
+                        Text("OK", fontWeight = FontWeight.Bold)
+                    }
+                }
+                
+                // Подсказка о диапазоне
+                Text(
+                    text = "Диапазон: от ${minWorkers.toInt()} до ${maxWorkers.toInt()} (с шагом $WORKERS_PER_GROUP)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(top = 4.dp)
                 )
 
                 
@@ -817,8 +851,7 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                     }
                 },
                 enabled = (isValid && !cooldownActive) || tunnelRunning,
-                modifier = Modifier
-                    .weight(1f)
+                modifier = Modifier                    .weight(1f)
                     .height(52.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
