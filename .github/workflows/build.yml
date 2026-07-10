@@ -71,7 +71,6 @@ jobs:
           fi
           echo "SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
           
-          # Install NDK
           yes | $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;26.1.10909125"
           echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
@@ -80,7 +79,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'  # Используем 1.22, т.к. 1.23+ требует флагов для anet
+          go-version: '1.25'
           cache: true
 
       - name: Setup additional dependencies
@@ -142,15 +141,14 @@ jobs:
         env:
           GO111MODULE: on
           GOPROXY: https://proxy.golang.org,direct
+          GOFLAGS: "-ldflags=-checklinkname=0"
         run: |
           echo "::group::Build client for ${{ matrix.arch.abi }}"
           
-          # Set ABI environment variable
           export ANDROID_ABI=${{ matrix.arch.abi }}
           export ABI_FILTER=${{ matrix.arch.abi }}
           
           if [ "${{ matrix.arch.abi }}" == "universal" ]; then
-            # For universal, build all ABIs
             if grep -q "\$1" scripts/build_client.sh; then
               ./scripts/build_client.sh arm64-v8a
               ./scripts/build_client.sh armeabi-v7a
@@ -159,7 +157,6 @@ jobs:
               ./scripts/build_client.sh
             fi
           else
-            # For single ABI
             if grep -q "\$1" scripts/build_client.sh; then
               ./scripts/build_client.sh ${{ matrix.arch.abi }}
             else
