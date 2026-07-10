@@ -306,7 +306,6 @@ jobs:
             - **WDTT-${{ env.VERSION }}-universal.apk** - Universal build (all architectures)
             
             ### 🔧 Build Information
-            - **Build Date:** $(date +'%Y-%m-%d %H:%M:%S')
             - **Version:** ${{ env.VERSION }}
             - **Type:** ${{ github.event.inputs.build_type || 'release' }}
             
