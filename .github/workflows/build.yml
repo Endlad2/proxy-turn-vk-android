@@ -208,7 +208,10 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
-    if: github.event.inputs.release_tag != '' || github.ref_type == 'tag'
+    # Создаем релиз только при пуше в main/master или при ручном запуске с указанием тега
+    if: |
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
     
     steps:
       - name: Download all artifacts
@@ -228,11 +231,75 @@ jobs:
           tree artifacts || ls -la artifacts/
           echo "::endgroup::"
 
+      - name: Generate release version
+        id: version
+        run: |
+          # Генерируем версию в формате ГГГГ.ММ.ЧЧ.ММ
+          VERSION=$(date +'%Y.%m.%H.%M')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Generated version: $VERSION"
+          
+          # Если указан release_tag, используем его
+          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            echo "TAG=${{ github.event.inputs.release_tag }}" >> $GITHUB_ENV
+            echo "Using custom tag: ${{ github.event.inputs.release_tag }}"
+          else
+            echo "TAG=v$VERSION" >> $GITHUB_ENV
+            echo "Using auto-generated tag: v$VERSION"
+          fi
+
+      - name: Rename APKs with version
+        run: |
+          VERSION=${{ env.VERSION }}
+          echo "Renaming APKs with version: $VERSION"
+          
+          # Находим все APK и переименовываем их
+          find artifacts -name "*.apk" -type f | while read -r apk; do
+            dir=$(dirname "$apk")
+            filename=$(basename "$apk")
+            
+            # Определяем архитектуру из имени файла или папки
+            if [[ "$filename" == *"arm64-v8a"* ]] || [[ "$dir" == *"arm64-v8a"* ]]; then
+              new_name="WDTT-${VERSION}-arm64-v8a.apk"
+            elif [[ "$filename" == *"armeabi-v7a"* ]] || [[ "$dir" == *"armeabi-v7a"* ]]; then
+              new_name="WDTT-${VERSION}-armeabi-v7a.apk"
+            elif [[ "$filename" == *"x86_64"* ]] || [[ "$dir" == *"x86_64"* ]]; then
+              new_name="WDTT-${VERSION}-x86_64.apk"
+            elif [[ "$filename" == *"universal"* ]] || [[ "$dir" == *"universal"* ]]; then
+              new_name="WDTT-${VERSION}-universal.apk"
+            else
+              # Если не можем определить архитектуру, добавляем суффикс
+              base="${filename%.apk}"
+              new_name="WDTT-${VERSION}-${base}.apk"
+            fi
+            
+            echo "Renaming: $filename -> $new_name"
+            mv "$apk" "$dir/$new_name"
+          done
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
-          name: Release ${{ github.event.inputs.release_tag || github.ref_name }}
+          tag_name: ${{ env.TAG }}
+          name: "WDTT v${{ env.VERSION }}"
+          body: |
+            ## WDTT Release v${{ env.VERSION }}
+            
+            ### 📱 APK Files
+            - **WDTT-${{ env.VERSION }}-arm64-v8a.apk** - For 64-bit ARM devices
+            - **WDTT-${{ env.VERSION }}-armeabi-v7a.apk** - For 32-bit ARM devices  
+            - **WDTT-${{ env.VERSION }}-x86_64.apk** - For 64-bit x86 devices
+            - **WDTT-${{ env.VERSION }}-universal.apk** - Universal build (all architectures)
+            
+            ### 🔧 Build Information
+            - **Build Date:** $(date +'%Y-%m-%d %H:%M:%S')
+            - **Version:** ${{ env.VERSION }}
+            - **Type:** ${{ github.event.inputs.build_type || 'release' }}
+            
+            ### 📥 Installation
+            Download the APK for your device architecture and install it.
+            
+            > **Note:** Make sure to enable "Install from unknown sources" in your device settings.
           draft: false
           prerelease: false
           files: |
