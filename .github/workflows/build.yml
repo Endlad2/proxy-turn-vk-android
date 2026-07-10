@@ -80,7 +80,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.22'  # Используем 1.22, т.к. 1.23+ требует флагов для anet
           cache: true
 
       - name: Setup additional dependencies
@@ -117,15 +117,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Make scripts executable
+      - name: Make all scripts executable
         run: |
+          chmod +x scripts/*.sh || true
           chmod +x scripts/build_go_libs || true
           chmod +x scripts/build-go-lib.sh || true
           chmod +x scripts/build_client.sh || true
           chmod +x scripts/build_apk.sh || true
+          chmod +x scripts/*.bat || true
           chmod +x gradlew || true
-
-
+          echo "All scripts are now executable"
 
       - name: Build Go libs
         run: |
@@ -138,21 +139,30 @@ jobs:
           echo "::endgroup::"
 
       - name: Build client for ${{ matrix.arch.abi }}
+        env:
+          GO111MODULE: on
+          GOPROXY: https://proxy.golang.org,direct
         run: |
           echo "::group::Build client for ${{ matrix.arch.abi }}"
           
-          # Set ABI environment variable if needed
+          # Set ABI environment variable
           export ANDROID_ABI=${{ matrix.arch.abi }}
+          export ABI_FILTER=${{ matrix.arch.abi }}
           
           if [ "${{ matrix.arch.abi }}" == "universal" ]; then
             # For universal, build all ABIs
-            ./scripts/build_client.sh arm64-v8a || ./scripts/build_client.sh
+            if grep -q "\$1" scripts/build_client.sh; then
+              ./scripts/build_client.sh arm64-v8a
+              ./scripts/build_client.sh armeabi-v7a
+              ./scripts/build_client.sh x86_64
+            else
+              ./scripts/build_client.sh
+            fi
           else
-            # For single ABI, pass as argument or use environment variable
+            # For single ABI
             if grep -q "\$1" scripts/build_client.sh; then
               ./scripts/build_client.sh ${{ matrix.arch.abi }}
             else
-              # If script doesn't accept arguments, use environment variable
               export ABI_FILTER=${{ matrix.arch.abi }}
               ./scripts/build_client.sh
             fi
@@ -168,10 +178,8 @@ jobs:
             BUILD_TYPE="debug"
           fi
           
-          # Set build type environment variable
           export BUILD_TYPE=$BUILD_TYPE
           
-          # Run build_apk.sh
           if [ -f "scripts/build_apk.sh" ]; then
             ./scripts/build_apk.sh
           else
@@ -194,7 +202,6 @@ jobs:
             BUILD_TYPE="debug"
           fi
           
-          # Find APK - try multiple locations
           APK_PATH=""
           POSSIBLE_PATHS=(
             "app/build/outputs/apk/$BUILD_TYPE/*.apk"
@@ -212,7 +219,6 @@ jobs:
             fi
           done
           
-          # If still not found, try without build type
           if [ -z "$APK_PATH" ]; then
             APK_PATH=$(find . -name "*.apk" -not -path "./.gradle/*" 2>/dev/null | grep -v "unaligned" | head -n 1)
           fi
@@ -220,9 +226,7 @@ jobs:
           echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
           echo "Found APK: $APK_PATH"
           
-          # Rename APK
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
-            # Try to find ABI in filename or use matrix abi
             if [[ "$APK_PATH" == *"arm64-v8a"* ]]; then
               cp "$APK_PATH" "WDTT-arm64-v8a.apk"
             elif [[ "$APK_PATH" == *"armeabi-v7a"* ]]; then
@@ -232,17 +236,13 @@ jobs:
             elif [[ "$APK_PATH" == *"universal"* ]]; then
               cp "$APK_PATH" "WDTT-universal.apk"
             else
-              # Use matrix abi if can't detect
               cp "$APK_PATH" "${{ matrix.arch.output }}"
             fi
             echo "APK_RENAMED=${{ matrix.arch.output }}" >> $GITHUB_ENV
             echo "APK size: $(du -h ${{ matrix.arch.output }} | cut -f1)"
           else
             echo "::error::APK not found!"
-            echo "Contents of app/build/outputs:"
-            find app/build/outputs -type f 2>/dev/null || echo "Directory not found"
-            echo "All APK files in project:"
-            find . -name "*.apk" -not -path "./.gradle/*" 2>/dev/null || echo "No APK files found"
+            find app/build/outputs -type f 2>/dev/null || echo "No files found"
             exit 1
           fi
           echo "::endgroup::"
