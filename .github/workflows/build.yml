@@ -105,7 +105,7 @@ jobs:
           
           # Создаем local.properties с пустым sdk.dir
           echo "Creating local.properties..."
-          cat > local.properties << EOF
+          cat > local.properties << 'EOF'
 sdk.dir=
 KEYSTORE_FILE=$(pwd)/release.keystore
 KEYSTORE_PASSWORD=release123
