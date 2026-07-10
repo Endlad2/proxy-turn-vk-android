@@ -531,10 +531,10 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                         onClick = {
                             val newValue = inputText.toIntOrNull()
                             if (newValue != null) {
+                                // Просто проверяем что в пределах диапазона, без округления
                                 val clampedValue = newValue.toFloat().coerceIn(minWorkers, maxWorkers)
-                                val roundedValue = roundToGroup(clampedValue, maxWorkers)
-                                workersInput = roundedValue
-                                inputText = roundedValue.toInt().toString()
+                                workersInput = clampedValue
+                                inputText = clampedValue.toInt().toString()
                                 scheduleSave()
                             }
                         },
@@ -548,7 +548,7 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                 
                 // Подсказка о диапазоне
                 Text(
-                    text = "Диапазон: от ${minWorkers.toInt()} до ${maxWorkers.toInt()} (с шагом $WORKERS_PER_GROUP)",
+                    text = "Диапазон: от ${minWorkers.toInt()} до ${maxWorkers.toInt()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     modifier = Modifier.padding(top = 4.dp)
@@ -851,7 +851,8 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                     }
                 },
                 enabled = (isValid && !cooldownActive) || tunnelRunning,
-                modifier = Modifier                    .weight(1f)
+                modifier = Modifier
+                    .weight(1f)
                     .height(52.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
