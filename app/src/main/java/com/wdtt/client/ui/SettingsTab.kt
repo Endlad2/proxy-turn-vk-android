@@ -16,12 +16,16 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Stop
@@ -36,6 +40,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Density
@@ -126,6 +132,11 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
     var serverDtlsPortInput by rememberSaveable { mutableStateOf("56000") }
     var serverWgPortInput by rememberSaveable { mutableStateOf("56001") }
 
+    // Состояния для конфигов
+    var configs by rememberSaveable { mutableStateOf<List<Config>>(emptyList()) }
+    var selectedConfigId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showAddConfigDialog by rememberSaveable { mutableStateOf(false) }
+
     val allHashes = remember(vkHash1, vkHash2, vkHash3, vkHash4) { listOf(vkHash1, vkHash2, vkHash3, vkHash4) }
     val uniqueHashes = remember(vkHash1, vkHash2, vkHash3, vkHash4) { allHashes.filter { it.isNotBlank() && it.length >= 16 }.distinct() }
     val parsedLinkHashes = remember(wdttLink) {
@@ -144,6 +155,26 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
     val dynamicMaxWorkers = remember(filledHashCount) { (filledHashCount.coerceAtLeast(1) * 27).toFloat() }
     var portInput by rememberSaveable { mutableStateOf("9000") }
     var sniInput by rememberSaveable { mutableStateOf("") }
+
+    // Загрузка конфигов из ссылки
+    LaunchedEffect(wdttLink, wdttLinkMode) {
+        if (wdttLinkMode && wdttLink.isNotBlank()) {
+            try {
+                val config = Config.fromLink(wdttLink)
+                if (config != null) {
+                    configs = listOf(config)
+                    if (selectedConfigId == null) {
+                        selectedConfigId = config.id
+                    }
+                }
+            } catch (_: Exception) {
+                // Ошибка парсинга
+            }
+        } else if (!wdttLinkMode) {
+            configs = emptyList()
+            selectedConfigId = null
+        }
+    }
 
     LaunchedEffect(dynamicMaxWorkers) {
         if (workersInput > dynamicMaxWorkers) {
@@ -263,12 +294,17 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
     }
 
     val scrollState = rememberScrollState()
+    val clipboardManager = LocalClipboardManager.current
 
     val isPeerValid = peerInput.isNotBlank() && !peerInput.contains(":")
     val isHashesValid = combinedHashes.isNotBlank()
     val isLinkValid = wdttLink.trim().startsWith("wdtt://") && wdttLink.trim().split(":").size >= 6 && wdttLink.trim().split(":")[5].isNotBlank()
     val isManualValid = isPeerValid && isHashesValid && savedConnectionPassword.isNotBlank() && !hasInputHashErrors
-    val isValid = if (wdttLinkMode) isLinkValid else isManualValid
+    val isValid = if (wdttLinkMode) {
+        configs.isNotEmpty() && selectedConfigId != null
+    } else {
+        isManualValid
+    }
     val effectiveServerDtlsPort = if (manualPortsEnabled) serverDtlsPortInput.toIntOrNull()?.coerceIn(1, 65535) ?: 56000 else 56000
     val effectiveLocalPort = if (manualPortsEnabled) portInput.toIntOrNull()?.coerceIn(1, 65535) ?: 9000 else 9000
     var pendingStartAfterVpnPermission by remember { mutableStateOf(false) }
@@ -277,35 +313,45 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
         val effectiveVkAuthMode = if (useVKCallsAuth) "vkcalls" else "legacy"
         val effectiveCaptchaMode = if (autoCaptchaEnabled) "auto" else if (useWVCaptcha) "wv" else "rjs"
         val effectiveCaptchaSolveMethod = if (!autoCaptchaEnabled && effectiveCaptchaMode == "wv" && isManualMode) "manual" else "auto"
+        
+        var finalPeer = peerInput
+        var finalHashes = combinedHashes
+        var finalLocalPort = effectiveLocalPort
+        var finalPassword = savedConnectionPassword
+        var finalLink = ""
+
+        if (wdttLinkMode && selectedConfigId != null) {
+            val selectedConfig = configs.find { it.id == selectedConfigId }
+            if (selectedConfig != null) {
+                finalLink = selectedConfig.toLink()
+                // Парсим ссылку
+                val clean = finalLink.removePrefix("wdtt://")
+                val parts = clean.split(":")
+                if (parts.size >= 5) {
+                    val ip = parts[0]
+                    val dtls = parts[1].toIntOrNull() ?: 56000
+                    finalLocalPort = parts[3].toIntOrNull() ?: 9000
+                    finalPassword = parts[4]
+                    val hash = if (parts.size >= 6) parts[5] else ""
+                    
+                    finalPeer = "$ip:$dtls"
+                    val rawHash = stripVkUrlStatic(hash)
+                    finalHashes = if (rawHash.isNotBlank()) rawHash else normalizeHashes(hash)
+                }
+            }
+        }
+
         saveJob?.cancel()
         scope.launch {
             settingsStore.save(
                 peerInput, combinedHashes, "",
-                workersInput.toInt(), "udp", effectiveLocalPort, sniInput, false
+                workersInput.toInt(), "udp", finalLocalPort, sniInput, false
             )
             settingsStore.saveVkAuthMode(effectiveVkAuthMode)
             settingsStore.saveCaptchaMode(effectiveCaptchaMode)
             settingsStore.saveCaptchaSolveMethod(effectiveCaptchaSolveMethod)
-        }
-
-        var finalPeer = "$peerInput:$effectiveServerDtlsPort"
-        var finalHashes = combinedHashes
-        var finalLocalPort = effectiveLocalPort
-        var finalPassword = savedConnectionPassword
-
-        if (wdttLinkMode && wdttLink.trim().startsWith("wdtt://")) {
-            val clean = wdttLink.trim().removePrefix("wdtt://")
-            val parts = clean.split(":")
-            if (parts.size >= 5) {
-                val ip = parts[0]
-                val dtls = parts[1].toIntOrNull() ?: 56000
-                finalLocalPort = parts[3].toIntOrNull() ?: 9000
-                finalPassword = parts[4]
-                val hash = if (parts.size >= 6) parts[5] else ""
-                
-                finalPeer = "$ip:$dtls"
-                val rawHash = stripVkUrlStatic(hash)
-                finalHashes = if (rawHash.isNotBlank()) rawHash else normalizeHashes(hash)
+            if (wdttLinkMode && finalLink.isNotBlank()) {
+                settingsStore.saveWdttLink(finalLink)
             }
         }
 
@@ -393,6 +439,44 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
         )
     }
 
+    // Диалог добавления конфига
+    if (showAddConfigDialog) {
+        AddConfigDialog(
+            onDismiss = { showAddConfigDialog = false },
+            onAddManual = {
+                showAddConfigDialog = false
+                // Показываем диалог ручного ввода
+                // Здесь можно добавить логику
+            },
+            onAddFromClipboard = {
+                showAddConfigDialog = false
+                val clipboardText = clipboardManager.getText()?.text ?: ""
+                if (clipboardText.isNotBlank()) {
+                    try {
+                        val config = Config.fromLink(clipboardText)
+                        if (config != null) {
+                            configs = configs + config
+                            if (selectedConfigId == null) {
+                                selectedConfigId = config.id
+                            }
+                            // Сохраняем в настройки
+                            scope.launch {
+                                settingsStore.saveWdttLink(clipboardText)
+                            }
+                            Toast.makeText(context, "Конфиг добавлен", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Неверный формат конфига", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Ошибка импорта", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    Toast.makeText(context, "Буфер обмена пуст", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -402,6 +486,7 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (!wdttLinkMode) {
+                // Режим ручного ввода
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     
                     Text(
@@ -493,10 +578,8 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                 val maxWorkers = dynamicMaxWorkers
                 val minWorkers = WORKERS_PER_GROUP.toFloat()
                 
-                // Состояние для поля ввода
                 var inputText by remember { mutableStateOf(workersInput.toInt().toString()) }
                 
-                // Обновляем поле при изменении workersInput
                 LaunchedEffect(workersInput) {
                     inputText = workersInput.toInt().toString()
                 }
@@ -509,7 +592,6 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                     OutlinedTextField(
                         value = inputText,
                         onValueChange = { 
-                            // Разрешаем ввод только цифр
                             if (it.isEmpty() || it.all { char -> char.isDigit() }) {
                                 inputText = it
                             }
@@ -531,7 +613,6 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                         onClick = {
                             val newValue = inputText.toIntOrNull()
                             if (newValue != null) {
-                                // Просто проверяем что в пределах диапазона, без округления
                                 val clampedValue = newValue.toFloat().coerceIn(minWorkers, maxWorkers)
                                 workersInput = clampedValue
                                 inputText = clampedValue.toInt().toString()
@@ -546,7 +627,6 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                     }
                 }
                 
-                // Подсказка о диапазоне
                 Text(
                     text = "Диапазон: от ${minWorkers.toInt()} до ${maxWorkers.toInt()}",
                     style = MaterialTheme.typography.bodySmall,
@@ -773,6 +853,10 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                         onCheckedChange = { enabled ->
                             scope.launch {
                                 settingsStore.saveWdttLinkMode(enabled)
+                                if (!enabled) {
+                                    configs = emptyList()
+                                    selectedConfigId = null
+                                }
                             }
                         }
                     )
@@ -780,23 +864,75 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
 
                 if (wdttLinkMode) {
                     Column {
-                        var linkText by remember(wdttLink) { mutableStateOf(wdttLink) }
-                        OutlinedTextField(
-                            value = linkText,
-                            onValueChange = {
-                                val cleaned = it.filter { c -> !c.isWhitespace() }
-                                linkText = cleaned
-                                scope.launch { settingsStore.saveWdttLink(cleaned) }
-                            },
-                            label = { Text("Ссылка wdtt://") },
-                            placeholder = { Text("Ссылка wdtt://") },
+                        // Рамка Конфиги
+                        Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            ),
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                             )
-                        )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Заголовок с кнопкой +
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "Конфиги",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    IconButton(
+                                        onClick = { showAddConfigDialog = true },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Add,
+                                            contentDescription = "Добавить конфиг",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+
+                                // Список конфигов
+                                if (configs.isEmpty()) {
+                                    Text(
+                                        "Нет конфигов. Нажмите + чтобы добавить",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        modifier = Modifier.padding(vertical = 8.dp)
+                                    )
+                                } else {
+                                    configs.forEach { config ->
+                                        ConfigItem(
+                                            config = config,
+                                            isSelected = config.id == selectedConfigId,
+                                            onSelect = {
+                                                selectedConfigId = config.id
+                                                // Сохраняем выбранный конфиг в настройки
+                                                scope.launch {
+                                                    settingsStore.saveWdttLink(config.toLink())
+                                                }
+                                            },
+                                            onCopy = {
+                                                clipboardManager.setText(AnnotatedString(config.toLink()))
+                                                Toast.makeText(context, "Ссылка скопирована", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -920,6 +1056,158 @@ private fun ProtocolChip(label: String, selected: Boolean, enabled: Boolean = tr
             disabledSelectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
         )
     )
+}
+
+@Composable
+private fun ConfigItem(
+    config: Config,
+    isSelected: Boolean,
+    onSelect: () -> Unit,
+    onCopy: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = if (isSelected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        border = BorderStroke(
+            1.dp,
+            if (isSelected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+            }
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onSelect() }
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = config.displayName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(
+                onClick = onCopy,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    Icons.Default.ContentCopy,
+                    contentDescription = "Копировать",
+                    tint = if (isSelected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddConfigDialog(
+    onDismiss: () -> Unit,
+    onAddManual: () -> Unit,
+    onAddFromClipboard: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Импорт конфига")
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Выберите способ импорта:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        },
+        confirmButton = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(
+                    onClick = onAddManual,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Ручной ввод")
+                }
+                TextButton(
+                    onClick = onAddFromClipboard,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Из буфера")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        }
+    )
+}
+
+// Класс для хранения конфига
+data class Config(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val ip: String,
+    val port: Int,
+    val password: String,
+    val hash: String = "",
+    val dtlsPort: Int = 56000,
+    val wgPort: Int = 56001,
+    val localPort: Int = 9000
+) {
+    val displayName: String
+        get() = "$ip:$port"
+
+    fun toLink(): String {
+        return "wdtt://$ip:$dtlsPort:$wgPort:$localPort:$password:$hash"
+    }
+
+    companion object {
+        fun fromLink(link: String): Config? {
+            if (!link.trim().startsWith("wdtt://")) return null
+            val clean = link.trim().removePrefix("wdtt://")
+            val parts = clean.split(":")
+            if (parts.size < 6) return null
+            
+            return try {
+                Config(
+                    ip = parts[0],
+                    port = parts[3].toIntOrNull() ?: 9000,
+                    password = parts[4],
+                    hash = parts.getOrElse(5) { "" },
+                    dtlsPort = parts[1].toIntOrNull() ?: 56000,
+                    wgPort = parts[2].toIntOrNull() ?: 56001,
+                    localPort = parts[3].toIntOrNull() ?: 9000
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
 }
 
 /**
