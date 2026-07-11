@@ -145,7 +145,7 @@ fun LogsTab() {
                     modifier = Modifier.fillMaxWidth().height(4.dp),
                     color = when {
                         cpuUsage > 70 -> MaterialTheme.colorScheme.error
-                        cpuUsage > 50 -> MaterialTheme.colorScheme.warning
+                        cpuUsage > 50 -> MaterialTheme.colorScheme.tertiary
                         else -> MaterialTheme.colorScheme.primary
                     },
                     trackColor = MaterialTheme.colorScheme.surfaceVariant
@@ -187,7 +187,7 @@ fun LogsTab() {
                     modifier = Modifier.fillMaxWidth().height(4.dp),
                     color = when {
                         ramUsage > 80 -> MaterialTheme.colorScheme.error
-                        ramUsage > 60 -> MaterialTheme.colorScheme.warning
+                        ramUsage > 60 -> MaterialTheme.colorScheme.tertiary
                         else -> MaterialTheme.colorScheme.primary
                     },
                     trackColor = MaterialTheme.colorScheme.surfaceVariant
