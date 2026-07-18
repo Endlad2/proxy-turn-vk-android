@@ -1,7 +1,5 @@
 package com.wdtt.client.ui
 
-import android.os.Parcelable
-import kotlinx.parcelize.Parcelize
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
@@ -136,16 +134,14 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
     var serverDtlsPortInput by rememberSaveable { mutableStateOf("56000") }
     var serverWgPortInput by rememberSaveable { mutableStateOf("56001") }
 
-    // Состояния для конфигов
-    var configs by rememberSaveable(
-        saver = listSaver(
-            save = { list: List<Config> -> list.map { it.toLink() } },
-            restore = { list: List<String> -> list.mapNotNull { Config.fromLink(it) } }
-        )
-    ) { mutableStateOf(emptyList()) }
-    var selectedConfigId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Состояния для конфигов - храним как список строк (ссылок)
+    var configLinks by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
+    var selectedConfigLink by rememberSaveable { mutableStateOf<String?>(null) }
     var showAddConfigDialog by rememberSaveable { mutableStateOf(false) }
     var showManualInputDialog by rememberSaveable { mutableStateOf(false) }
+
+    // Конвертируем ссылки в объекты Config для отображения
+    val configs = configLinks.mapNotNull { Config.fromLink(it) }
 
     val allHashes = remember(vkHash1, vkHash2, vkHash3, vkHash4) { listOf(vkHash1, vkHash2, vkHash3, vkHash4) }
     val uniqueHashes = remember(vkHash1, vkHash2, vkHash3, vkHash4) { allHashes.filter { it.isNotBlank() && it.length >= 16 }.distinct() }
@@ -172,17 +168,17 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
             try {
                 val config = Config.fromLink(wdttLink)
                 if (config != null) {
-                    configs = listOf(config)
-                    if (selectedConfigId == null) {
-                        selectedConfigId = config.id
+                    configLinks = listOf(wdttLink)
+                    if (selectedConfigLink == null) {
+                        selectedConfigLink = wdttLink
                     }
                 }
             } catch (_: Exception) {
                 // Ошибка парсинга
             }
         } else if (!wdttLinkMode) {
-            configs = emptyList()
-            selectedConfigId = null
+            configLinks = emptyList()
+            selectedConfigLink = null
         }
     }
 
@@ -311,7 +307,7 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
     val isLinkValid = wdttLink.trim().startsWith("wdtt://") && wdttLink.trim().split(":").size >= 6 && wdttLink.trim().split(":")[5].isNotBlank()
     val isManualValid = isPeerValid && isHashesValid && savedConnectionPassword.isNotBlank() && !hasInputHashErrors
     val isValid = if (wdttLinkMode) {
-        configs.isNotEmpty() && selectedConfigId != null
+        configs.isNotEmpty() && selectedConfigLink != null
     } else {
         isManualValid
     }
@@ -330,8 +326,8 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
         var finalPassword = savedConnectionPassword
         var finalLink = ""
 
-        if (wdttLinkMode && selectedConfigId != null) {
-            val selectedConfig = configs.find { it.id == selectedConfigId }
+        if (wdttLinkMode && selectedConfigLink != null) {
+            val selectedConfig = Config.fromLink(selectedConfigLink!!)
             if (selectedConfig != null) {
                 finalLink = selectedConfig.toLink()
                 // Парсим ссылку
@@ -464,9 +460,9 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                     try {
                         val config = Config.fromLink(clipboardText)
                         if (config != null) {
-                            configs = configs + config
-                            if (selectedConfigId == null) {
-                                selectedConfigId = config.id
+                            configLinks = configLinks + clipboardText
+                            if (selectedConfigLink == null) {
+                                selectedConfigLink = clipboardText
                             }
                             scope.launch {
                                 settingsStore.saveWdttLink(clipboardText)
@@ -494,9 +490,9 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                     try {
                         val config = Config.fromLink(link)
                         if (config != null) {
-                            configs = configs + config
-                            if (selectedConfigId == null) {
-                                selectedConfigId = config.id
+                            configLinks = configLinks + link
+                            if (selectedConfigLink == null) {
+                                selectedConfigLink = link
                             }
                             scope.launch {
                                 settingsStore.saveWdttLink(link)
@@ -893,8 +889,8 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                             scope.launch {
                                 settingsStore.saveWdttLinkMode(enabled)
                                 if (!enabled) {
-                                    configs = emptyList()
-                                    selectedConfigId = null
+                                    configLinks = emptyList()
+                                    selectedConfigLink = null
                                 }
                             }
                         }
@@ -955,9 +951,9 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
                                     configs.forEach { config ->
                                         ConfigItem(
                                             config = config,
-                                            isSelected = config.id == selectedConfigId,
+                                            isSelected = config.toLink() == selectedConfigLink,
                                             onSelect = {
-                                                selectedConfigId = config.id
+                                                selectedConfigLink = config.toLink()
                                                 scope.launch {
                                                     settingsStore.saveWdttLink(config.toLink())
                                                 }
@@ -1265,8 +1261,7 @@ private fun ManualInputDialog(
     )
 }
 
-// Класс для хранения конфига (Parcelable)
-@Parcelize
+// Класс для хранения конфига - без Parcelize, просто data class
 data class Config(
     val id: String = java.util.UUID.randomUUID().toString(),
     val ip: String,
@@ -1276,7 +1271,7 @@ data class Config(
     val dtlsPort: Int = 56000,
     val wgPort: Int = 56001,
     val localPort: Int = 9000
-) : Parcelable {
+) {
     val displayName: String
         get() = "$ip:$port"
 
