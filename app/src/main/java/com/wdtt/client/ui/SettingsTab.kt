@@ -1,5 +1,7 @@
 package com.wdtt.client.ui
 
+import android.os.Parcelable
+import kotlinx.parcelize.Parcelize
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -134,7 +137,12 @@ fun SettingsTabContent(context: android.content.Context, scope: kotlinx.coroutin
     var serverWgPortInput by rememberSaveable { mutableStateOf("56001") }
 
     // Состояния для конфигов
-    var configs by rememberSaveable { mutableStateOf<List<Config>>(emptyList()) }
+    var configs by rememberSaveable(
+        saver = listSaver(
+            save = { list: List<Config> -> list.map { it.toLink() } },
+            restore = { list: List<String> -> list.mapNotNull { Config.fromLink(it) } }
+        )
+    ) { mutableStateOf(emptyList()) }
     var selectedConfigId by rememberSaveable { mutableStateOf<String?>(null) }
     var showAddConfigDialog by rememberSaveable { mutableStateOf(false) }
     var showManualInputDialog by rememberSaveable { mutableStateOf(false) }
@@ -1257,7 +1265,8 @@ private fun ManualInputDialog(
     )
 }
 
-// Класс для хранения конфига
+// Класс для хранения конфига (Parcelable)
+@Parcelize
 data class Config(
     val id: String = java.util.UUID.randomUUID().toString(),
     val ip: String,
@@ -1267,7 +1276,7 @@ data class Config(
     val dtlsPort: Int = 56000,
     val wgPort: Int = 56001,
     val localPort: Int = 9000
-) {
+) : Parcelable {
     val displayName: String
         get() = "$ip:$port"
 
